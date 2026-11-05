@@ -67,4 +67,13 @@ public class ASHTMLSerializer extends org.apache.xml.serialize.HTMLSerializer {
 			_printer.flush();
 	}
 
+	@Override
+	protected String escapeURI(String uri) {
+		try {
+			printEscaped(uri);
+		} catch (IOException e) {
+			// URI escaping failed; nothing is printed for this value
+		}
+		return "";
+	}
 }
