@@ -1,0 +1,73 @@
+name: seal-build
+
+# AntiSamy 1.5.8 ships no CI of its own; this workflow builds the jar with the
+# project's own Maven build (pom.xml: compiler source/target 1.7) and runs its
+# full JUnit suite via surefire. The published jar was built with Maven 3.5.3 on
+# JDK 1.8.0_172 (see its MANIFEST.MF), so the same toolchain is used here.
+
+on:
+  workflow_dispatch:
+    inputs:
+      test-filter:
+        description: "Optional surefire -Dtest selector; empty runs the full suite"
+        required: false
+        default: ""
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 8
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "8"
+
+      - name: Install Maven 3.5.3
+        run: |
+          curl -fsSL https://archive.apache.org/dist/maven/maven-3/3.5.3/binaries/apache-maven-3.5.3-bin.tar.gz -o /tmp/maven.tgz
+          tar -xzf /tmp/maven.tgz -C /opt
+          echo "/opt/apache-maven-3.5.3/bin" >> "$GITHUB_PATH"
+
+      - name: Build and test
+        env:
+          TEST_FILTER: ${{ inputs.test-filter }}
+        run: |
+          mvn -v
+          if [ -n "$TEST_FILTER" ]; then
+            mvn -B -e clean package -Dmaven.javadoc.skip=true -Dtest="$TEST_FILTER" -DfailIfNoTests=false
+          else
+            mvn -B -e clean package -Dmaven.javadoc.skip=true
+          fi
+
+      - name: Print test results
+        if: always()
+        run: |
+          python3 - <<'EOF'
+          import glob, xml.etree.ElementTree as ET
+          t = f = e = s = 0
+          for p in sorted(glob.glob('target/surefire-reports/TEST-*.xml')):
+              r = ET.parse(p).getroot()
+              for tc in r.iter('testcase'):
+                  name = f"{tc.get('classname')}.{tc.get('name')}"
+                  status = 'PASSED'
+                  for child in tc:
+                      if child.tag in ('failure', 'error'):
+                          status = child.tag.upper()
+                      elif child.tag == 'skipped':
+                          status = 'SKIPPED: ' + (child.get('message') or 'no message')
+                  print(f"{status:8} {name}")
+              t += int(r.get('tests', 0)); f += int(r.get('failures', 0))
+              e += int(r.get('errors', 0)); s += int(r.get('skipped', 0))
+          print(f"TOTAL tests={t} passed={t-f-e-s} failures={f} errors={e} skipped={s}")
+          EOF
+
+      - name: Upload jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: antisamy-jar
+          path: target/antisamy-1.5.8.jar
+          if-no-files-found: error
