@@ -69,6 +69,8 @@ public class MagicSAXFilter extends DefaultFilter implements XMLDocumentFilter {
 	private boolean isNofollowAnchors;
 	private boolean isValidateParamAsEmbed;
 	private boolean inCdata = false;
+	// number of open raw text elements (see Constants.RAW_TEXT_TAGS)
+	private int rawTextElementDepth = 0;
     // From policy
     private boolean preserveComments;
     private int maxInputSize;
@@ -91,6 +93,7 @@ public class MagicSAXFilter extends DefaultFilter implements XMLDocumentFilter {
         cssAttributes = null;
         cssScanner = null;
         inCdata = false;
+        rawTextElementDepth = 0;
 
     }
 
@@ -116,6 +119,12 @@ public class MagicSAXFilter extends DefaultFilter implements XMLDocumentFilter {
 
     private static final Pattern conditionalDirectives =
             Pattern.compile("<?!?\\[\\s*(?:end)?if[^]]*\\]>?");
+    /*
+     * Comment content that makes browsers close the comment before the
+     * serialized "-->": "<!-->", "<!--->", "--!>" and "-->".
+     */
+    private static final Pattern earlyCommentClosing =
+            Pattern.compile("^-?>|--!?>");
 
     public void comment(XMLString text, Augmentations augs) throws XNIException {
 
@@ -125,7 +134,16 @@ public class MagicSAXFilter extends DefaultFilter implements XMLDocumentFilter {
 			// PRESERVE_COMMENTS setting.
 			if (value != null) {
                 value = conditionalDirectives.matcher(value).replaceAll("");
-				super.comment(new XMLString(value.toCharArray(), 0, value.length()), augs);
+				/*
+				 * Do not preserve comments that browsers would not parse as
+				 * such: inside raw text elements the comment is plain text, so
+				 * its content could close the element, and some content closes
+				 * the comment early. Either way the rest would be parsed as
+				 * markup.
+				 */
+				if (rawTextElementDepth == 0 && !earlyCommentClosing.matcher(value).find()) {
+					super.comment(new XMLString(value.toCharArray(), 0, value.length()), augs);
+				}
 			}
 		}
 	}
@@ -148,6 +166,9 @@ public class MagicSAXFilter extends DefaultFilter implements XMLDocumentFilter {
     }
 
 	public void endElement(QName element, Augmentations augs) throws XNIException {
+        if (rawTextElementDepth > 0 && Constants.RAW_TEXT_TAGS.contains(element.localpart.toLowerCase())) {
+            rawTextElementDepth--;
+        }
         Ops topOp = peekTop();
         if (Ops.REMOVE == topOp) {
 			// content is removed altogether
@@ -233,6 +254,12 @@ public class MagicSAXFilter extends DefaultFilter implements XMLDocumentFilter {
 		// see if we have a policy for this tag.
         String tagNameLowerCase = element.localpart.toLowerCase();
         Tag tag = policy.getTagByLowercaseName(tagNameLowerCase);
+
+        // raw text elements are tracked whatever their action is, so that
+        // comments inside them are never preserved
+        if (Constants.RAW_TEXT_TAGS.contains(tagNameLowerCase)) {
+            rawTextElementDepth++;
+        }
 
 		/*
 		 * Handle the automatic translation of <param> to nested <embed> for IE.

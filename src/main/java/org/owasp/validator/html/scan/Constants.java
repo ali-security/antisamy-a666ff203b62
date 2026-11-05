@@ -46,6 +46,19 @@ public class Constants {
     	"iframe", "script", "link"
     };
 
+    /*
+     * Elements whose content browsers parse as (escapable) raw text. A comment
+     * preserved inside one of them would not be a comment for the browser, so
+     * its content could break out of the element (mutation XSS).
+     */
+    private static final String[] rawTextTags = {
+        "iframe", "noembed", "noframes", "noscript", "plaintext", "script",
+        "style", "textarea", "title", "xmp"
+    };
+
+    static final Set<String> RAW_TEXT_TAGS =
+            Collections.unmodifiableSet(new HashSet<String>(Arrays.asList(rawTextTags)));
+
     static {
         Attribute paramNameAttr = new Attribute("name", Arrays.asList(Policy.ANYTHING_REGEXP), Collections.<String>emptyList(), null, null );
         Attribute paramValueAttr = new Attribute("value", Arrays.asList(Policy.ANYTHING_REGEXP), Collections.<String>emptyList(), null, null );

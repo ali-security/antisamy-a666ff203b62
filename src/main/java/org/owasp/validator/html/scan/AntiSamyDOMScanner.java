@@ -68,6 +68,12 @@ public class AntiSamyDOMScanner extends AbstractAntiSamyScanner {
             Pattern.compile("[\\u0000-\\u001F\\uD800-\\uDFFF\\uFFFE-\\uFFFF&&[^\\u0009\\u000A\\u000D]]");
     private static final Pattern conditionalDirectives =
             Pattern.compile("<?!?\\[\\s*(?:end)?if[^]]*\\]>?");
+    /*
+     * Comment content that makes browsers close the comment before the
+     * serialized "-->": "<!-->", "<!--->", "--!>" and "-->".
+     */
+    private static final Pattern earlyCommentClosing =
+            Pattern.compile("^-?>|--!?>");
 
     private static final Queue<CachedItem> cachedItems = new ConcurrentLinkedQueue<CachedItem>();
 
@@ -718,9 +724,30 @@ public class AntiSamyDOMScanner extends AbstractAntiSamyScanner {
             // Strip conditional directives regardless of the
             // PRESERVE_COMMENTS setting.
             if (value != null) {
-                ((Comment) node).setData(conditionalDirectives.matcher(value).replaceAll(""));
+                value = conditionalDirectives.matcher(value).replaceAll("");
+                ((Comment) node).setData(value);
+            }
+
+            /*
+             * Do not preserve comments that browsers would not parse as such:
+             * inside raw text elements the comment is plain text, so its
+             * content could close the element, and some content closes the
+             * comment early. Either way the rest would be parsed as markup.
+             */
+            if (hasRawTextAncestor(node) || (value != null && earlyCommentClosing.matcher(value).find())) {
+                node.getParentNode().removeChild(node);
             }
         }
+    }
+
+    private static boolean hasRawTextAncestor(Node node) {
+        for (Node parent = node.getParentNode(); parent != null; parent = parent.getParentNode()) {
+            if (parent instanceof Element
+                    && Constants.RAW_TEXT_TAGS.contains(parent.getNodeName().toLowerCase())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean removeDisallowedEmpty(Node node){

@@ -1440,4 +1440,76 @@ static final String test33 = "<html>\n"
         assertThat(as.scan(input, policy, AntiSamy.DOM).getCleanHTML(), not(containsString("mxss")));
         assertThat(as.scan(input, policy, AntiSamy.SAX).getCleanHTML(), not(containsString("mxss")));
     }
+
+    @Test
+    public void testRawTextProcessingWhenPreservingComments() throws ScanException, PolicyException {
+        // Concern is that when preserving comments, certain tags would get their content badly parsed
+        // due to mutation XSS.
+        String[] payloads = {
+            "<noscript><!--</noscript><img src=x onerror=mxss(1)>-->",
+            "<textarea/><!--</textarea><img src=x onerror=mxss(1)>-->",
+            "<xmp/><!--</xmp><img src=x onerror=mxss(1)>-->"
+        };
+
+        TestPolicy revised = policy.cloneWithDirective(Policy.PRESERVE_COMMENTS, "true");
+        Tag tag = new Tag("xmp", Collections.<String, Attribute>emptyMap(), Policy.ACTION_VALIDATE);
+        revised = revised.addTagRule(tag);
+
+        for (String payload : payloads) {
+            assertThat(as.scan(payload, revised, AntiSamy.DOM).getCleanHTML(), not(containsString("mxss")));
+            assertThat(as.scan(payload, revised, AntiSamy.SAX).getCleanHTML(), not(containsString("mxss")));
+        }
+    }
+
+    @Test
+    public void testCommentsInsideOtherRawTextElementsWhenPreservingComments() throws ScanException, PolicyException {
+        // Same mutation XSS concern as above, for the remaining elements whose content browsers
+        // parse as raw text. The comment must not be preserved whatever the element's action is.
+        String[] elements = {"noembed", "noframes", "plaintext", "style", "title"};
+
+        TestPolicy revised = policy.cloneWithDirective(Policy.PRESERVE_COMMENTS, "true");
+        for (String element : elements) {
+            String payload = "<" + element + "/><!--</" + element + "><img src=x onerror=mxss(1)>-->";
+            assertThat(as.scan(payload, revised, AntiSamy.DOM).getCleanHTML(), not(containsString("mxss")));
+            assertThat(as.scan(payload, revised, AntiSamy.SAX).getCleanHTML(), not(containsString("mxss")));
+
+            TestPolicy validating = revised.addTagRule(
+                    new Tag(element, Collections.<String, Attribute>emptyMap(), Policy.ACTION_VALIDATE));
+            assertThat(as.scan(payload, validating, AntiSamy.DOM).getCleanHTML(), not(containsString("mxss")));
+            assertThat(as.scan(payload, validating, AntiSamy.SAX).getCleanHTML(), not(containsString("mxss")));
+        }
+
+        // Comments outside raw text elements are still preserved.
+        String input = "<div><noscript>text</noscript><!-- kept --></div>";
+        assertThat(as.scan(input, revised, AntiSamy.DOM).getCleanHTML(), containsString("<!-- kept -->"));
+        assertThat(as.scan(input, revised, AntiSamy.SAX).getCleanHTML(), containsString("<!-- kept -->"));
+    }
+
+    @Test
+    public void testMalformedCommentClosingWhenPreservingComments() throws ScanException, PolicyException {
+        // Comments that browsers close earlier than the serialized "-->" ("<!-->", "<!--->" and "--!>")
+        // would let the rest of the comment be parsed as markup when preserving comments.
+        String[] payloads = {
+            "<!--><img src=x onerror=mxss(1)>-->",
+            "<!---><img src=x onerror=mxss(1)>-->",
+            "<!--<div/>--!><img src=x onerror=mxss(1)>-->",
+            "<div><!--><img src=x onerror=mxss(1)>--></div>",
+            // the conditional directives are stripped before serializing, which must not
+            // leave an early closing sequence behind either
+            "<!--[if IE]>><img src=x onerror=mxss(1)>-->",
+            "<!----[if IE]!><img src=x onerror=mxss(1)>-->"
+        };
+
+        TestPolicy revised = policy.cloneWithDirective(Policy.PRESERVE_COMMENTS, "true");
+
+        for (String payload : payloads) {
+            assertThat(as.scan(payload, revised, AntiSamy.DOM).getCleanHTML(), not(containsString("mxss")));
+            assertThat(as.scan(payload, revised, AntiSamy.SAX).getCleanHTML(), not(containsString("mxss")));
+        }
+
+        // Regular comments containing "->" or "--" are still preserved.
+        String input = "<div><!-- a -> b -- c --></div>";
+        assertThat(as.scan(input, revised, AntiSamy.DOM).getCleanHTML(), containsString("<!-- a -> b -- c -->"));
+        assertThat(as.scan(input, revised, AntiSamy.SAX).getCleanHTML(), containsString("<!-- a -> b -- c -->"));
+    }
 }
