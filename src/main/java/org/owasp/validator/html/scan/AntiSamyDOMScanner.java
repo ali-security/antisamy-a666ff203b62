@@ -401,10 +401,17 @@ public class AntiSamyDOMScanner extends AbstractAntiSamyScanner {
 
         try {
 
-            Node firstChild = ele.getFirstChild();
-            if (firstChild != null) {
+            int childNodesCount = ele.getChildNodes().getLength();
+            if (childNodesCount > 0) {
+                String toScan = "";
 
-                String toScan = firstChild.getNodeValue();
+                for (int i = 0; i < ele.getChildNodes().getLength(); i++) {
+                    Node childNode = ele.getChildNodes().item(i);
+                    if (!toScan.isEmpty()){
+                        toScan += "\n";
+                    }
+                    toScan += childNode.getTextContent();
+                }
 
                 CleanResults cr = styleScanner.scanStyleSheet(toScan, policy.getMaxInputSize());
 
@@ -418,18 +425,25 @@ public class AntiSamyDOMScanner extends AbstractAntiSamyScanner {
                  * break all CSS. To prevent that, we have this check.
                  */
 
-                final String cleanHTML = cr.getCleanHTML();
+                String cleanHTML = cr.getCleanHTML();
+                cleanHTML = cleanHTML == null || cleanHTML.equals("") ? "/* */" : cleanHTML;
 
-                if (cleanHTML == null || cleanHTML.equals("")) {
-
-                    firstChild.setNodeValue("/* */");
-
-                } else {
-
-                    firstChild.setNodeValue(cleanHTML);
-
+                Node firstChild = ele.getFirstChild();
+                if (firstChild instanceof Text) firstChild.setNodeValue(cleanHTML);
+                else {
+                    ele.insertBefore(document.createTextNode(cleanHTML), firstChild);
+                    childNodesCount++;
                 }
 
+                /*
+                 * Remove every other node after cleaning CSS, there will
+                 * be only one node in the end, as it always should have.
+                 * Starting from the end due to list updating on the fly.
+                 */
+                for (int i = childNodesCount - 1; i >= 1; i--) {
+                    Node childNode = ele.getChildNodes().item(i);
+                    ele.removeChild(childNode);
+                }
             }
 
         } catch (DOMException e) {

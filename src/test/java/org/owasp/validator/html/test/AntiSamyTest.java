@@ -1408,4 +1408,36 @@ static final String test33 = "<html>\n"
         assertThat(as.scan("<p><a href=\"javascript&#00058x=1,%61%6c%65%72%74%28%22%62%6f%6f%6d%22%29\">xss</a></p>", revised, AntiSamy.SAX).getCleanHTML(),
                 containsString("javascript&amp;#00058"));
     }
+
+    @Test
+    public void testSmuggledTagsInStyleContent() throws ScanException, PolicyException {
+        // HTML tags may be smuggled into a style tag after parsing input to an internal representation.
+        // If that happens, they should be treated as text content and not as children nodes.
+
+        Policy revised = policy.cloneWithDirective("useXHTML","true");
+        assertThat(as.scan("<style/>b<![cdata[</style><a href=javascript:alert(1)>test", revised, AntiSamy.DOM).getCleanHTML(), not(containsString("javascript")));
+        assertThat(as.scan("<style/>b<![cdata[</style><a href=javascript:alert(1)>test", revised, AntiSamy.SAX).getCleanHTML(), not(containsString("javascript")));
+        assertThat(as.scan("<select<style/>k<input<</>input/onfocus=alert(1)>", revised, AntiSamy.DOM).getCleanHTML(), not(containsString("input")));
+        assertThat(as.scan("<select<style/>k<input<</>input/onfocus=alert(1)>", revised, AntiSamy.SAX).getCleanHTML(), not(containsString("input")));
+
+        Policy revised2 = policy.cloneWithDirective("useXHTML","false");
+        assertThat(as.scan("<select<style/>W<xmp<script>alert(1)</script>", revised2, AntiSamy.DOM).getCleanHTML(), not(containsString("script")));
+        assertThat(as.scan("<select<style/>W<xmp<script>alert(1)</script>", revised2, AntiSamy.SAX).getCleanHTML(), not(containsString("script")));
+        assertThat(as.scan("<select<style/>k<input<</>input/onfocus=alert(1)>", revised2, AntiSamy.DOM).getCleanHTML(), not(containsString("input")));
+        assertThat(as.scan("<select<style/>k<input<</>input/onfocus=alert(1)>", revised2, AntiSamy.SAX).getCleanHTML(), not(containsString("input")));
+    }
+
+    @Test
+    public void testSmuggledTagsInStyleContentCase2() throws ScanException, PolicyException {
+        // Style tag processing was not handling correctly the value set to its child node that should
+        // be only text. On some mutation scenarios due to filtering tags by default, content was being
+        // smuggled and not properly sanitized by the output serializer.
+        String input = "<style/><listing/>]]><noembed></style><img src=x onerror=mxss(1)></noembed>";
+        assertThat(as.scan(input, policy, AntiSamy.DOM).getCleanHTML(), not(containsString("mxss")));
+        assertThat(as.scan(input, policy, AntiSamy.SAX).getCleanHTML(), not(containsString("mxss")));
+
+        input = "<style/><math>'<noframes ></style><img src=x onerror=mxss(1)></noframes>'";
+        assertThat(as.scan(input, policy, AntiSamy.DOM).getCleanHTML(), not(containsString("mxss")));
+        assertThat(as.scan(input, policy, AntiSamy.SAX).getCleanHTML(), not(containsString("mxss")));
+    }
 }
