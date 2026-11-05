@@ -1512,4 +1512,33 @@ static final String test33 = "<html>\n"
         assertThat(as.scan(input, revised, AntiSamy.DOM).getCleanHTML(), containsString("<!-- a -> b -- c -->"));
         assertThat(as.scan(input, revised, AntiSamy.SAX).getCleanHTML(), containsString("<!-- a -> b -- c -->"));
     }
+
+    @Test
+    public void testBangCommentsWhenPreservingComments() throws ScanException, PolicyException {
+        // Concern is that when preserving comments, certain endings of comments would be
+        // misinterpreted.
+        TestPolicy revised = policy.cloneWithDirective(Policy.PRESERVE_COMMENTS, "true");
+        assertThat(
+            as.scan("<!--<div/>--!><img src=x onerror=mxss(1)> <li>--></p>", revised, AntiSamy.DOM)
+                .getCleanHTML(),
+            not(containsString("mxss")));
+        assertThat(
+            as.scan("<!--<div/>--!><img src=x onerror=mxss(1)> <li>--></p>", revised, AntiSamy.SAX)
+                .getCleanHTML(),
+            not(containsString("mxss")));
+        assertThat(
+            as.scan(
+                    "<!--<div/>--><img src=x onerror=mxss(1)> <li>--></p><input/>",
+                    revised,
+                    AntiSamy.DOM)
+                .getCleanHTML(),
+            not(containsString("mxss")));
+        assertThat(
+            as.scan(
+                    "<!--<div/>--><img src=x onerror=mxss(1)> <li>--></p><input/>",
+                    revised,
+                    AntiSamy.SAX)
+                .getCleanHTML(),
+            not(containsString("mxss")));
+    }
 }
